@@ -2,16 +2,21 @@ import numpy as np
 import cv2
 import time
 import matplotlib
+import os
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.font_manager import FontProperties
-import os
 
 # 导入自定义模块
 from hamming import Hamming74, Hamming73
 from conv_code import ConvCode212, ConvCodeSys312, ConvCodeNonSys312
 
+# --- 0. 路径归档初始化 ---
+IMAGE_OUT_DIR = "output_images"
+PLOT_OUT_DIR = "plots"
+os.makedirs(IMAGE_OUT_DIR, exist_ok=True)
+os.makedirs(PLOT_OUT_DIR, exist_ok=True)
 
 def image_to_bitstream(image_path):
     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
@@ -19,17 +24,16 @@ def image_to_bitstream(image_path):
         raise FileNotFoundError(f"找不到图像文件: {image_path}")
     return np.unpackbits(img), img.shape
 
-
-def bitstream_to_image(bitstream, shape, output_path):
+def bitstream_to_image(bitstream, shape, filename):
     img_array = np.packbits(bitstream).reshape(shape)
+    # 自动保存到 output_images 文件夹
+    output_path = os.path.join(IMAGE_OUT_DIR, filename)
     cv2.imwrite(output_path, img_array)
-
 
 def add_noise(bitstream, pe):
     length = len(bitstream)
     noise_seq = (np.random.rand(length) < pe).astype(np.uint8)
     return np.bitwise_xor(bitstream, noise_seq)
-
 
 def calculate_ber(original, received):
     return np.sum(original != received) / len(original)
@@ -96,78 +100,56 @@ if __name__ == "__main__":
         print("正在进行大规模性能仿真 (1% - 99%)...")
         np.random.seed(42)
         sim_bits = np.random.randint(0, 2, 50000, dtype=np.uint8)
-        pe_list = [0.01, 0.05, 0.1,0.15,0.2,0.25, 0.3, 0.5, 0.7, 0.9, 0.99]
+        pe_list = [0.01, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.5, 0.7, 0.9, 0.99]
 
         results = {'无编码基准': [], '汉明码 (7,4)': [], '汉明码 (7,3)': [], '卷积码 非系统(2,1,2)': [],
                    '卷积码 系统(3,1,2)': [], '卷积码 非系统(3,1,2)': []}
 
         for pe in pe_list:
             results['无编码基准'].append(calculate_ber(sim_bits, add_noise(sim_bits, pe)))
-            # 汉明码
-            e, p = h74.encode(sim_bits);
-            results['汉明码 (7,4)'].append(calculate_ber(sim_bits, h74.decode(add_noise(e, pe), p)))
-            e, p = h73.encode(sim_bits);
-            results['汉明码 (7,3)'].append(calculate_ber(sim_bits, h73.decode(add_noise(e, pe), p)))
-            # 卷积码
-            results['卷积码 非系统(2,1,2)'].append(
-                calculate_ber(sim_bits, c212.decode(add_noise(c212.encode(sim_bits), pe))))
-            results['卷积码 系统(3,1,2)'].append(
-                calculate_ber(sim_bits, cs312.decode(add_noise(cs312.encode(sim_bits), pe))))
-            results['卷积码 非系统(3,1,2)'].append(
-                calculate_ber(sim_bits, cn312.decode(add_noise(cn312.encode(sim_bits), pe))))
+            e, p = h74.encode(sim_bits); results['汉明码 (7,4)'].append(calculate_ber(sim_bits, h74.decode(add_noise(e, pe), p)))
+            e, p = h73.encode(sim_bits); results['汉明码 (7,3)'].append(calculate_ber(sim_bits, h73.decode(add_noise(e, pe), p)))
+            results['卷积码 非系统(2,1,2)'].append(calculate_ber(sim_bits, c212.decode(add_noise(c212.encode(sim_bits), pe))))
+            results['卷积码 系统(3,1,2)'].append(calculate_ber(sim_bits, cs312.decode(add_noise(cs312.encode(sim_bits), pe))))
+            results['卷积码 非系统(3,1,2)'].append(calculate_ber(sim_bits, cn312.decode(add_noise(cn312.encode(sim_bits), pe))))
 
         # ================= 绘制折线图  =================
         plt.figure(figsize=(10, 6), dpi=150)
         for name, bers in results.items():
-            if len(bers) == len(pe_list):
-                plt.plot(pe_list, bers, marker='o', label=name, linewidth=1.5)
-            else:
-                print(f"警告: {name} 的数据长度({len(bers)})与pe_list({len(pe_list)})不匹配，跳过折线绘图。")
+            plt.plot(pe_list, bers, marker='o', label=name, linewidth=1.5)
 
         plt.xlabel('信道误码率 (Pe)', fontproperties=my_font)
         plt.ylabel('译码后误码率 (BER)', fontproperties=my_font)
         plt.title('全量程性能演变曲线 (0.01 - 0.99)', fontproperties=my_font)
         plt.grid(True, ls='--', alpha=0.5)
         plt.legend(prop=my_font, fontsize=9)
-        plt.savefig('折线图.png', bbox_inches='tight')
-        print("已生成: 折线图.png")
+        plt.savefig(os.path.join(PLOT_OUT_DIR, '性能对比折线图.png'), bbox_inches='tight')
 
-        # ================= 绘制柱状图 () =================
-        target_pes = [0.05, 0.15, 0.25,0.50,0.99]
+        # ================= 绘制柱状图 =================
+        target_pes = [0.05, 0.15, 0.25, 0.50, 0.99]
         bar_colors = ['#7f7f7f', '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
 
         for target_pe in target_pes:
-            # 找到最接近的 Pe 值索引
             closest_pe = min(pe_list, key=lambda x: abs(x - target_pe))
             idx = pe_list.index(closest_pe)
 
             plt.figure(figsize=(10, 6), dpi=150)
-
-            # 只提取长度正确的数据进行展示
-            valid_keys = [k for k in results.keys() if len(results[k]) == len(pe_list)]
+            valid_keys = list(results.keys())
             values = [results[k][idx] for k in valid_keys]
 
             bars = plt.bar(valid_keys, values, color=bar_colors[:len(valid_keys)])
-
-            # 在柱子顶端标注数值
             for bar in bars:
                 height = bar.get_height()
-                plt.text(bar.get_x() + bar.get_width() / 2., height,
-                         f'{height:.4f}', ha='center', va='bottom', fontsize=9)
+                plt.text(bar.get_x() + bar.get_width() / 2., height, f'{height:.4f}', ha='center', va='bottom', fontsize=9)
 
-            plt.axhline(y=closest_pe, color='black', linestyle='--', alpha=0.3,
-                        label=f'信道原始误码率({closest_pe})')
+            plt.axhline(y=closest_pe, color='black', linestyle='--', alpha=0.3, label=f'原始误码率({closest_pe})')
             plt.xticks(fontproperties=my_font, rotation=15)
             plt.ylabel('译码后误码率 (BER)', fontproperties=my_font)
-            plt.title(f'信道误码率为 {int(closest_pe * 100)}% 时各编码方法性能对比', fontproperties=my_font)
-            plt.legend(prop=my_font)
+            plt.title(f'信道误码率为 {int(closest_pe * 100)}% 时各编码方法对比', fontproperties=my_font)
             plt.tight_layout()
+            plt.savefig(os.path.join(PLOT_OUT_DIR, f'对比柱状图_{int(closest_pe * 100)}.png'), bbox_inches='tight')
 
-            save_name = f'柱状图_{int(closest_pe * 100)}.png'
-            plt.savefig(save_name, bbox_inches='tight')
-            print(f"已生成: {save_name}")
-
-        print("\n所有图像及统计图表已成功生成！")
+        print("\n>>> 所有仿真图像已保存至 output_images/ 和 plots/ 文件夹！")
 
     except Exception as e:
         print(f"出错: {e}")

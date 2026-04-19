@@ -3,7 +3,12 @@ import cv2
 import heapq
 from collections import defaultdict
 import time
+import os  # 导入 os 模块
 from hamming import Hamming74
+
+# --- 0. 路径归档初始化 ---
+IMAGE_OUT_DIR = "output_images"
+os.makedirs(IMAGE_OUT_DIR, exist_ok=True)
 
 
 # ================= 1. 信源编码器 (霍夫曼) =================
@@ -52,7 +57,6 @@ class HuffmanCoder:
         return np.array([int(b) for b in bit_string], dtype=np.uint8)
 
     def decode(self, bitstream):
-        # 优化：提升解码速度
         bit_string = "".join(bitstream.astype(str))
         decoded_data = []
         current_code = ""
@@ -77,7 +81,7 @@ def calc_ber(original, received):
 # ================= 3. 主程序：联合编码实战 =================
 def main():
     img_path = '0.bmp'
-    test_pe = 0.05  # 测试误码率 (建议分别测试 0.01 和 0.08 观察不同现象)
+    test_pe = 0.05
 
     img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
     if img is None:
@@ -122,12 +126,11 @@ def main():
     print(f"[阶段 4] 信道译码 (纠错) 完成. 耗时: {time.time() - t1:.2f}s")
     print(f"         -> 纠错后残留误码率: {residual_ber:.6f}\n")
 
-    # --- E. 信源译码 (强鲁棒性重构) ---
+    # --- E. 信源译码与图像重构 ---
     print(f"[阶段 5] 信源译码 (解压) 与图像重构...")
     try:
         final_pixels = huffman.decode(corrected_bits)
 
-        # 核心改进：无论解压出多少像素，强制对齐原始图像尺寸！
         if len(final_pixels) > raw_pixel_count:
             print("         ! 警告: 发生错误扩散，解码像素过多，强制截断。")
             final_pixels = final_pixels[:raw_pixel_count]
@@ -137,15 +140,18 @@ def main():
             final_pixels = np.concatenate((final_pixels, padding))
 
         reconstructed_img = final_pixels.reshape(img.shape)
-        output_name = f'3-1_joint_result_pe_{int(test_pe * 100)}.bmp'
-        cv2.imwrite(output_name, reconstructed_img)
+
+        # 自动保存到 output_images
+        filename = f'3-1_joint_result_pe_{int(test_pe * 100)}.bmp'
+        save_path = os.path.join(IMAGE_OUT_DIR, filename)
+        cv2.imwrite(save_path, reconstructed_img)
 
         print("\n" + "=" * 50)
         if residual_ber == 0:
             print(f" 仿真成功！实现了 100% 无损传输。")
         else:
             print(f" 仿真完成！存在部分残留误码导致图像花屏。")
-        print(f" 图像已保存为: {output_name}")
+        print(f" 图像已保存为: {save_path}")
         print("=" * 50 + "\n")
 
     except Exception as e:
